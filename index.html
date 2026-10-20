@@ -29,7 +29,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const T=THREE;
-// Define shared materials before building the intro room, which calls mat() immediately.
+// Initialize shared materials before constructing the intro room.
 const mat=(c,r=.9,map)=>new T.MeshStandardMaterial({color:c,roughness:r,map:map||null});
 const renderer=new T.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
