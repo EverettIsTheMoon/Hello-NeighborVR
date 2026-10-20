@@ -506,6 +506,10 @@ let left=null,flashlight=null;
    else c.visible=false})});
 let held=null;const hp=new T.Vector3(),lastHp=new T.Vector3(),hvel=new T.Vector3();
 let prevBtn=[],snapReady=true;
+// Desktop fallback controls are useful for debugging when no XR controller is available.
+const heldKeys=new Set();
+addEventListener('keydown',e=>{if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','ShiftLeft','ShiftRight'].includes(e.code))e.preventDefault();heldKeys.add(e.code)});
+addEventListener('keyup',e=>heldKeys.delete(e.code));
 function setNote(n){note=n;drawHUD()}
 function calmDown(){state='patrol';path=[];patrolGoal=null;target=null;lostT=0;calmT=4;tone(300,150,.5,'sine',.15);setNote(gemTaken?N3:hasKey?N2:N1)}
 function noise(x,z,y){if(state==='chase'||!inHouse(x,z))return;target={x,z};targetL=lvlOf(y);state='investigate';lostT=0;path=[];setNote('He heard that...')}
@@ -551,7 +555,7 @@ function update(dt,time){
     if(cutsceneT<1.5){camera.position.y=.62;rig.position.set(0,0,40);fadeMat.opacity=Math.max(0,1-cutsceneT/1.5)}
     else if(cutsceneT<3.8){camera.position.y=.62+(cutsceneT-1.5)*.42;fadeMat.opacity=0}
     else if(cutsceneT<5.3){camera.position.y=1.6;fadeMat.opacity=Math.min(1,(cutsceneT-3.8)/1.5)}
-    else {introHome.visible=false;rig.position.set(0,0,26);camera.position.y=1.6;py=0;cutsceneT=-1;arrivalFade=1.5;fadeMat.opacity=1}
+    else {introHome.visible=false;rig.position.set(0,0,20);camera.position.y=1.6;py=0;cutsceneT=-1;arrivalFade=1.5;fadeMat.opacity=1}
     return;
   }
   if(arrivalFade>0){arrivalFade=Math.max(0,arrivalFade-dt);fadeMat.opacity=arrivalFade/1.5}
@@ -574,7 +578,9 @@ function update(dt,time){
     if(edge(4)){crouch=!crouch;if(crouch&&state==='chase')calmDown();else drawHUD()}
     if(edge(5)&&flashlight){flash=!flash;flashlight.visible=flash}
     const wasSp=sprint;sprint=pb(3)&&!crouch;if(wasSp!==sprint)drawHUD();
-    const sx=ax[2]||0,sy=ax[3]||0;
+    // WebXR browsers disagree about whether the thumbstick occupies axes 0/1 or 2/3.
+    let sx=0,sy=0;const pairs=[[ax[2]||0,ax[3]||0],[ax[0]||0,ax[1]||0]];
+    const stick=pairs.find(v=>Math.hypot(v[0],v[1])>.12)||pairs[0];sx=stick[0];sy=stick[1];
     if(pb(1)){
       if(Math.abs(sx)>.7&&snapReady){snapReady=false;headXZ();const x0=headP.x,z0=headP.z;rig.rotation.y+=(sx>0?-1:1)*Math.PI/6;headXZ();rig.position.x+=x0-headP.x;rig.position.z+=z0-headP.z}
       if(Math.abs(sx)<.4)snapReady=true;
@@ -593,6 +599,14 @@ function update(dt,time){
       if(!pb(0)&&held){held.held=false;held.vel.copy(hvel).multiplyScalar(1.2);held=null}
       if(held)held.m.position.copy(hp)}
     prevBtn=b.map(x=>x.pressed)}}
+  // Keyboard locomotion fallback (WASD/arrows) also works in desktop preview.
+  if(heldKeys.size&&(!s||!renderer.xr.isPresenting)){
+    let kx=(heldKeys.has('KeyD')||heldKeys.has('ArrowRight')?1:0)-(heldKeys.has('KeyA')||heldKeys.has('ArrowLeft')?1:0);
+    let kz=(heldKeys.has('KeyS')||heldKeys.has('ArrowDown')?1:0)-(heldKeys.has('KeyW')||heldKeys.has('ArrowUp')?1:0);
+    const km=Math.hypot(kx,kz);if(km>.01){kx/=km;kz/=km;camera.getWorldDirection(dir);dir.y=0;dir.normalize();tmpV.set(-dir.z,0,dir.x);
+      const fast=heldKeys.has('ShiftLeft')||heldKeys.has('ShiftRight');const spd=fast?3.4:2.1;
+      rig.position.addScaledVector(dir,-kz*spd*dt).addScaledVector(tmpV,kx*spd*dt);fixRig();moving=true;}
+  }
   cOff+=((crouch?-.6:0)-cOff)*Math.min(1,dt*10);rig.position.y=py+cOff;
   if(hasKey&&door.m.visible){headXZ();if(lvlOf(py)===0&&Math.hypot(headP.x-16,headP.z+6)<2.4){door.m.visible=false;walls.splice(walls.indexOf(door),1);tone(110,55,.9,'sawtooth',.3);puff(.5,.3,700);setNote('Vault open! Grab the gem')}}
   // thrown items
@@ -618,7 +632,12 @@ function update(dt,time){
   nbStepT-=dt;if(mvd>.002&&nbStepT<=0&&nbStepSnd){if(nbStepSnd.isPlaying)nbStepSnd.stop();nbStepSnd.play();nbStepT=state==='chase'?.27:.5}
   if(state==='chase'&&ac){hbT-=dt;if(hbT<=0){tone(70,40,.18,'sine',.6);tone(70,40,.18,'sine',.45,.2);hbT=.55}}
   creakT-=dt;if(creakT<=0&&ac){tone(95+Math.random()*60,50,.9,'sawtooth',.06);creakT=7+Math.random()*12}
-  stuckT+=dt;if(stuckT>1.5){if(state!=='chase'&&Math.hypot(nx-sx0,nz-sz0)<.3){patrolGoal=null;path=[];if(state==='investigate')state='patrol'}sx0=nx;sz0=nz;stuckT=0}
+  stuckT+=dt;if(stuckT>1.5){if(state!=='chase'&&Math.hypot(nx-sx0,nz-sz0)<.3){
+    // If a waypoint is blocked by furniture, select a different reachable point on this floor.
+    const own=nodes.filter(q=>q.l===lvlOf(nb.position.y)&&Math.hypot(q.x-nx,q.z-nz)>3&&los(nx,nz,q.x,q.z,nb.position.y+1.4));
+    if(own.length)patrolGoal=own[(Math.random()*own.length)|0];path=[];pathT=0;
+    if(state==='investigate'){state='patrol';target=null;}
+  }sx0=nx;sz0=nz;stuckT=0}
   nb.position.y=floorAt(nb.position.x,nb.position.z,ny)+Math.abs(Math.sin(time*(state==='chase'?9:5)))*.03;
   if(state!==prev){if(state==='chase'){tone(1000,350,.6,'sawtooth',.3);tone(1500,500,.5,'square',.12,.05)}setNote(won?'You escaped! You win!':state==='chase'?'RUN! Sprint away!':state==='investigate'?'He heard something...':(gemTaken?N3:hasKey?N2:N1))}
   if(gemTaken&&!won&&lvlOf(py)===1&&pz>14.6&&Math.abs(px)<20){won=true;winSnd();setNote('YOU ESCAPED! You win!')}
