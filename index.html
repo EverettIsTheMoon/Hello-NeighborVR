@@ -2,18 +2,30 @@
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Sneak Next Door - VR Fan Game</title>
 <style>
-:root{--bg:#050608;--fg:#ddd;--btn:#e8a317;--btnfg:#111}
+:root{--bg:#050608;--fg:#eee;--btn:#e8a317;--btnfg:#111}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;overflow:hidden}
-#ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;z-index:5;pointer-events:none}
-#ui h1{margin:0 0 8px;font-size:28px}#ui p{max-width:540px;font-size:14px;line-height:1.5;opacity:.88}
-#vr{pointer-events:auto;margin-top:14px;padding:16px 34px;font-size:20px;border:0;border-radius:10px;background:var(--btn);color:var(--btnfg);font-weight:bold}
+#ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:18px;z-index:5;background:radial-gradient(ellipse at center,#202536 0%,#050608 75%);overflow:auto}
+#ui h1{margin:0 0 8px;font-size:clamp(28px,5vw,48px);letter-spacing:2px}
+#ui p{max-width:600px;font-size:14px;line-height:1.5;opacity:.9}
+.actrow{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:10px 0}
+.act{pointer-events:auto;padding:12px 16px;border:2px solid #555;border-radius:10px;background:#161a24;color:#eee;font-weight:bold;cursor:pointer;min-width:110px}
+.act.selected{border-color:#e8a317;background:#40331b}
+#vr,#mic{pointer-events:auto;margin-top:10px;padding:13px 28px;font-size:17px;border:0;border-radius:10px;background:var(--btn);color:var(--btnfg);font-weight:bold;cursor:pointer}
+#fade{position:fixed;inset:0;background:#000;z-index:10;pointer-events:none;opacity:1;transition:opacity 1.8s ease}
+.small{font-size:12px;opacity:.7}
 </style></head><body>
-<div id="ui"><h1>Sneak Next Door</h1>
-<p>A fan-made VR stealth game (not an official game). The neighbor’s mansion has three floors, including the basement. Your mission: 1) find the brass key upstairs in the far bedroom, 2) unlock the vault in the back-right of the basement and steal the glowing gem, 3) escape out the front door. He chases you the moment he sees you, but he never leaves his house and he can’t climb stairs. The basement is pitch black: bring your flashlight. Crouch and stay still to hide from him. Turn your sound up.<br><br>
-<b>Left controller only:</b> Stick = move · Grip + stick left/right = snap turn · Stick click = sprint (loud) · X = crouch · Y = flashlight · Trigger = grab / throw (throw things to lure him)</p>
-<b>Microphone:</b> He can hear you talk! Whispering is safe, but talking normally or yelling will bring him to you. Tap the mic button first and allow access.<br>
-<button id="mic" style="pointer-events:auto;margin-top:12px;padding:10px 22px;font-size:16px;border:0;border-radius:10px;background:#2a8;color:#fff;font-weight:bold">Enable microphone</button><br>
-<button id="vr">Enter VR</button><div id="msg" style="margin-top:10px;font-size:13px"></div><div id="micmsg"></div></div>
+<div id="ui">
+<h1>SNEAK NEXT DOOR</h1><p>Choose an act. You wake up at home, then sneak into your neighbor’s house, find the key, open the basement vault, steal the gem, and escape.</p>
+<div class="actrow" id="acts">
+<button class="act selected" data-act="1">ACT ONE<br><span class="small">Easy · Small home</span></button>
+<button class="act" data-act="2">ACT TWO<br><span class="small">Hard · Bigger home</span></button>
+<button class="act" data-act="3">ACT THREE<br><span class="small">Nightmare · Giant home</span></button>
+</div>
+<p><b>Left controller only:</b> Left stick = move · Grip + stick = turn · Stick click = sprint · X = crouch · Y = flashlight · Trigger = grab/throw. The right controller is disabled.</p>
+<button id="mic">Enable microphone</button><button id="vr">START ACT 1 IN VR</button>
+<div id="msg" style="margin-top:10px;font-size:13px"></div><div id="micmsg"></div>
+<p class="small">If the VR browser supports WebXR DOM overlays, the menu stays visible in-headset. Otherwise choose your act here before entering VR.</p>
+</div><div id="fade"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const T=THREE;
@@ -24,6 +36,31 @@ document.body.appendChild(renderer.domElement);
 const scene=new T.Scene();scene.background=new T.Color(0x0a1020);scene.fog=new T.Fog(0x0a1020,10,70);
 const camera=new T.PerspectiveCamera(70,innerWidth/innerHeight,0.05,200);
 const rig=new T.Group();rig.add(camera);scene.add(rig);rig.position.set(0,0,26);camera.position.y=1.6;
+// ---------- act selection and wake-up cutscene ----------
+let selectedAct=1,gameStarted=false,cutsceneT=-1,arrivalFade=0,fadeMesh=null;
+const actSettings={
+  1:{name:'Act One',speed:2.35,patrol:0.85,investigate:1.45,range:15,lose:3.5,house:'small'},
+  2:{name:'Act Two',speed:3.25,patrol:1.3,investigate:2.0,range:20,lose:5.0,house:'large'},
+  3:{name:'Act Three',speed:4.65,patrol:1.8,investigate:2.8,range:27,lose:7.0,house:'giant'}
+};
+let act=actSettings[1];
+const actButtons=[...document.querySelectorAll('.act')];
+function chooseAct(n){selectedAct=n;act=actSettings[n];actButtons.forEach(b=>b.classList.toggle('selected',+b.dataset.act===n));if(typeof act2Wings!=='undefined'){act2Wings.forEach(g=>g.visible=n===2);act3Wings.forEach(g=>g.visible=n===3)}document.getElementById('vr').textContent=renderer.xr.getSession()?'BEGIN ACT '+n:'START ACT '+n+' IN VR';}
+actButtons.forEach(b=>b.addEventListener('click',()=>chooseAct(+b.dataset.act)));
+const introHome=new T.Group();introHome.position.set(0,0,40);scene.add(introHome);
+function introBox(x,y,z,w,h,d,color){const m=new T.Mesh(new T.BoxGeometry(w,h,d),mat(color));m.position.set(x,y,z);introHome.add(m);return m}
+introBox(0,-.12,0,9,.2,9,0x4b382c); // living-room floor
+introBox(0,1.6,-4.45,9,3.3,.2,0x45404a);
+introBox(-4.45,1.6,0,.2,3.3,9,0x55505a);introBox(4.45,1.6,0,.2,3.3,9,0x55505a);
+introBox(0,3.25,0,9,.2,9,0x292733);
+introBox(0,.55,1.3,2.8,.75,1.2,0x55406c); // couch base
+introBox(0,1.0,1.85,2.8,.8,.3,0x684e80);introBox(-1.3,.95,1.3,.25,.9,1.25,0x684e80);introBox(1.3,.95,1.3,.25,.9,1.25,0x684e80);
+introBox(-3.7,1.2,-2.8,.12,1.4,.9,0x8d713f);introBox(-3.6,1.2,-2.7,.03,1.0,.6,0x222b39);
+const introLamp=new T.PointLight(0xffc982,1.2,12);introLamp.position.set(0,2.8,1);introHome.add(introLamp);
+introHome.visible=false;
+const fadeMat=new T.MeshBasicMaterial({color:0x000000,transparent:true,opacity:1,depthTest:false,depthWrite:false});
+fadeMesh=new T.Mesh(new T.PlaneGeometry(2,2),fadeMat);fadeMesh.renderOrder=10000;fadeMesh.position.set(0,0,-.3);camera.add(fadeMesh);fadeMat.opacity=0;
+
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 
 // ---------- lights ----------
@@ -41,7 +78,7 @@ const walls=[];
 function box(cx,cz,w,d,h,y,color,o={}){
   let mp=o.map;if(mp&&o.rep){mp=mp.clone();mp.needsUpdate=true;mp.repeat.set(o.rep[0],o.rep[1])}
   const m=new T.Mesh(new T.BoxGeometry(w,h,d),o.basic?new T.MeshBasicMaterial({color}):mat(color,.9,mp));m.position.set(cx,y+h/2,cz);scene.add(m);
-  if(o.solid!==false){const b={x1:cx-w/2,x2:cx+w/2,z1:cz-d/2,z2:cz+d/2,y0:y,y1:y+h,m};walls.push(b);return b}return {m}}
+  if(o.solid!==false){m.userData.collisionRegistered=true;const b={x1:cx-w/2,x2:cx+w/2,z1:cz-d/2,z2:cz+d/2,y0:y,y1:y+h,m};walls.push(b);return b}return {m}}
 function seg(a,b,gaps,f){gaps=gaps.slice().sort((p,q)=>p[0]-q[0]);let c=a;for(const g of gaps){if(g[0]>c)f(c,g[0]);c=g[1]}if(b>c)f(c,b)}
 function wbox(cx,cz,w,d,c){const L=Math.max(w,d);return typeof c==='object'?box(cx,cz,w,d,WH,curY,0xffffff,{map:c.t,rep:[Math.max(L/2.2,.3),c.ry]}):box(cx,cz,w,d,WH,curY,c)}
 function hw(z,x1,x2,gaps,c){seg(x1,x2,gaps,(a,b)=>wbox((a+b)/2,z,b-a,.3,c));gaps.forEach(g=>box((g[0]+g[1])/2,z,g[1]-g[0],.32,.7,curY+2.3,0x3a2a1a,{solid:false}))}
@@ -104,6 +141,19 @@ function plan(l,c){curY=Y[l];const[O,Hh,L,R]=c;
 }
 const OB={c:1,t:TX.brick(),ry:1.4},SB={c:1,t:TX.block(),ry:1.4},wp=(a,b)=>({c:1,t:TX.paper(a,b),ry:1});
 plan(0,[SB,SB,SB,SB]);plan(1,[OB,wp('#4a6a4a','#587a58'),wp('#7a3a4a','#8a4a5a'),wp('#3a4a6a','#4a5a7a')]);plan(2,[OB,wp('#5a4a6a','#6a5a7a'),wp('#8a7a5a','#9a8a6a'),wp('#3a6a6a','#4a7a7a')]);
+// Extra exterior wings mark the progressively larger Act Two and Act Three homes.
+const act2Wings=[],act3Wings=[];
+function addHouseWing(x,z,w,d,h,color,groupList){const g=new T.Group();scene.add(g);groupList.push(g);
+  const wall=new T.Mesh(new T.BoxGeometry(w,h,d),mat(color));wall.position.set(x,h/2,z);g.add(wall);
+  const roof=new T.Mesh(new T.BoxGeometry(w+.4,.22,d+.4),mat(0x21191b));roof.position.set(x,h+.11,z);g.add(roof);
+  for(let yy=1.4;yy<h-.4;yy+=2.2){const win=new T.Mesh(new T.PlaneGeometry(1.3,1.1),winM);win.position.set(x,yy,z+d/2+.02);g.add(win)}
+}
+addHouseWing(29,1,15,25,5.5,0x4b2525,act2Wings);addHouseWing(-29,1,15,25,5.5,0x4b2525,act2Wings);
+addHouseWing(0,-24,25,15,5.5,0x4b2525,act2Wings);
+addHouseWing(43,0,15,42,7,0x35202a,act3Wings);addHouseWing(-43,0,15,42,7,0x35202a,act3Wings);
+addHouseWing(0,-37,42,14,7,0x35202a,act3Wings);addHouseWing(0,27,42,14,7,0x35202a,act3Wings);
+act2Wings.forEach(g=>g.visible=false);act3Wings.forEach(g=>g.visible=false);
+
 slab(-3.2,0x777777,stoneTex);slab(0,0x5a3b22,woodTex,[-10.5,-1.5]);slab(3.2,0x5a3b22,woodTex,[1.5,10.5]);slab(6.4,0x2a1a1a);
 // stairs: up (ground->upper) and down (ground->basement), solid steps + rails
 for(let k=0;k<16;k++){box(0,10-(k+.5)*.5,3,.5,(k+1)*.2,0,0x8a6a44);box(0,-10+(k+.5)*.5,3,.5,(k+1)*.2,-3.2,0x777777)}
@@ -161,6 +211,27 @@ function shelfBooks(x,z,w,y){const m=new T.Mesh(new T.PlaneGeometry(w,2),mat(0xf
 // pipes in basement
 [-13.2,13.2].forEach(z=>{const p=new T.Mesh(new T.CylinderGeometry(.1,.1,39),mat(0x884422));p.rotation.z=Math.PI/2;p.position.set(0,Y[0]+2.75,z);scene.add(p)});
 
+// Add colliders to solid-looking environment meshes that were previously decorative-only.
+// Existing box() colliders are marked so they are not duplicated. Flat decals and wall pictures
+// are intentionally excluded; they should not stop the player from moving.
+function meshHasVisibleParent(m){for(let o=m;o;o=o.parent)if(!o.visible)return false;return true}
+function addMissingEnvironmentColliders(){
+  scene.updateMatrixWorld(true);
+  const solidGeometry=/^(BoxGeometry|CylinderGeometry|SphereGeometry|ConeGeometry|OctahedronGeometry|IcosahedronGeometry|DodecahedronGeometry|TetrahedronGeometry)$/;
+  scene.traverse(m=>{
+    if(!m.isMesh||m.userData.collisionRegistered||!m.geometry||!solidGeometry.test(m.geometry.type))return;
+    if(m===fadeMesh||m===camera||m.parent===camera||m.userData.noCollision)return;
+    const bounds=new T.Box3().setFromObject(m);
+    if(bounds.isEmpty())return;
+    const size=new T.Vector3();bounds.getSize(size);
+    // Skip tiny glowing specks and near-zero objects that are visual effects rather than obstacles.
+    if(size.x<.035&&size.y<.035&&size.z<.035)return;
+    walls.push({x1:bounds.min.x,x2:bounds.max.x,z1:bounds.min.z,z2:bounds.max.z,y0:bounds.min.y,y1:bounds.max.y,m});
+    m.userData.collisionRegistered=true;
+  });
+}
+addMissingEnvironmentColliders();
+
 // ---------- items ----------
 const items=[];
 function item(kind,x,y,z,color,size,em){
@@ -185,9 +256,10 @@ const nb=new T.Group();
 nb.position.set(-2.2,0,0);scene.add(nb);
 
 // ---------- collision / sight ----------
-function hit(x,z,y){for(const b of walls)if(y>b.y0&&y<b.y1&&x>b.x1&&x<b.x2&&z>b.z1&&z<b.z2)return true;return false}
+function colliderActive(b){return !b.m||meshHasVisibleParent(b.m)}
+function hit(x,z,y){for(const b of walls)if(colliderActive(b)&&y>b.y0&&y<b.y1&&x>b.x1&&x<b.x2&&z>b.z1&&z<b.z2)return true;return false}
 function los(ax,az,bx,bz,eye){const d=Math.hypot(bx-ax,bz-az),n=Math.ceil(d/.25);for(let i=1;i<n;i++){const t=i/n;if(hit(ax+(bx-ax)*t,az+(bz-az)*t,eye))return false}return true}
-function resolve(p,r,y0,y1){for(const b of walls){if(b.y1<=y0||b.y0>=y1)continue;
+function resolve(p,r,y0,y1){for(const b of walls){if(!colliderActive(b)||b.y1<=y0||b.y0>=y1)continue;
   const cx=Math.max(b.x1,Math.min(p.x,b.x2)),cz=Math.max(b.z1,Math.min(p.z,b.z2));const dx=p.x-cx,dz=p.z-cz,d=Math.hypot(dx,dz);
   if(d<r){if(d<1e-5){p.x+=r;continue}p.x+=dx/d*(r-d);p.z+=dz/d*(r-d)}}}
 const inHouse=(x,z)=>Math.abs(x)<20&&Math.abs(z)<14;
@@ -471,6 +543,17 @@ function fixRig(){headXZ();const p={x:headP.x,z:headP.z},ox=p.x,oz=p.z;resolve(p
   headXZ();py=floorAt(headP.x,headP.z,py)}
 
 function update(dt,time){
+  if(!gameStarted)return;
+  // Fade in on the couch, wake up, stand, fade out, and arrive at the neighbor's house.
+  if(cutsceneT>=0){
+    cutsceneT+=dt;introHome.visible=true;
+    if(cutsceneT<1.5){camera.position.y=.62;rig.position.set(0,0,40);fadeMat.opacity=Math.max(0,1-cutsceneT/1.5)}
+    else if(cutsceneT<3.8){camera.position.y=.62+(cutsceneT-1.5)*.42;fadeMat.opacity=0}
+    else if(cutsceneT<5.3){camera.position.y=1.6;fadeMat.opacity=Math.min(1,(cutsceneT-3.8)/1.5)}
+    else {introHome.visible=false;rig.position.set(0,0,26);camera.position.y=1.6;py=0;cutsceneT=-1;arrivalFade=1.5;fadeMat.opacity=1}
+    return;
+  }
+  if(arrivalFade>0){arrivalFade=Math.max(0,arrivalFade-dt);fadeMat.opacity=arrivalFade/1.5}
   if(dead>0){dead-=dt;const e=DEAD0-dead;
     // t<.12s: face lunges from far away to filling the view; then shakes, flickers and keeps creeping closer
     const lunge=Math.min(1,e/.12),sc=e<.12?.15+lunge*lunge*1.9:2.05+e*.35+Math.sin(e*40)*.06;
@@ -520,16 +603,16 @@ function update(dt,time){
   // neighbor: chases on sight, never leaves the house
   headXZ();const px=headP.x,pz=headP.z,nx=nb.position.x,nz=nb.position.z,ny=nb.position.y;const dist=Math.hypot(px-nx,pz-nz);
   const ang=Math.atan2(px-nx,pz-nz),da=Math.abs(((ang-nb.rotation.y+Math.PI*3)%(Math.PI*2))-Math.PI);
-  const seen=!won&&!hidden&&!(crouch&&calmT>0)&&inHouse(px,pz)&&Math.abs(ny-py)<1.2&&dist<22&&(da<1.5||dist<4)&&los(nx,nz,px,pz,Math.max(ny,py)+1.4);
+  const seen=!won&&!hidden&&!(crouch&&calmT>0)&&inHouse(px,pz)&&Math.abs(ny-py)<1.2&&dist<act.range&&(da<1.5||dist<4)&&los(nx,nz,px,pz,Math.max(ny,py)+1.4);
   micUpdate(dt);
   fxUpdate(dt,time,dist,ny);
   const prev=state;
   if(seen){state='chase';target={x:px,z:pz};targetL=lvlOf(py);lostT=0}
   if(state==='chase'){if(!seen){lostT+=dt;if(lostT>5){state='investigate';lostT=0}}
-    const c=clampIn(target.x,target.z);routeTo(c[0],c[1],targetL,3.0,dt);if(dist<.9&&Math.abs(ny-py)<1.2&&!hidden)caught()}
-  else if(state==='investigate'){const c=clampIn(target.x,target.z);if(routeTo(c[0],c[1],targetL,2.0,dt)){lostT+=dt;if(lostT>1.5){state='patrol';target=null;patrolGoal=null}}}
+    const c=clampIn(target.x,target.z);routeTo(c[0],c[1],targetL,act.speed,dt);if(dist<.9&&Math.abs(ny-py)<1.2&&!hidden)caught()}
+  else if(state==='investigate'){const c=clampIn(target.x,target.z);if(routeTo(c[0],c[1],targetL,act.investigate,dt)){lostT+=dt;if(lostT>1.5){state='patrol';target=null;patrolGoal=null}}}
   else{if(!patrolGoal||Math.hypot(patrolGoal.x-nx,patrolGoal.z-nz)<.8&&lvlOf(ny)===patrolGoal.l){const own=nodes.filter(q=>q.l===lvlOf(ny));patrolGoal=own[(Math.random()*own.length)|0]}
-    routeTo(patrolGoal.x,patrolGoal.z,patrolGoal.l,1.3,dt)}
+    routeTo(patrolGoal.x,patrolGoal.z,patrolGoal.l,act.patrol,dt)}
   const mvd=Math.hypot(nb.position.x-pnx,nb.position.z-pnz);pnx=nb.position.x;pnz=nb.position.z;
   nbStepT-=dt;if(mvd>.002&&nbStepT<=0&&nbStepSnd){if(nbStepSnd.isPlaying)nbStepSnd.stop();nbStepSnd.play();nbStepT=state==='chase'?.27:.5}
   if(state==='chase'&&ac){hbT-=dt;if(hbT<=0){tone(70,40,.18,'sine',.6);tone(70,40,.18,'sine',.45,.2);hbT=.55}}
@@ -546,11 +629,22 @@ drawHUD();
 const btn=document.getElementById('vr'),msg=document.getElementById('msg'),ui=document.getElementById('ui');
 document.getElementById('mic').onclick=()=>{initAudio();initMic()};
 btn.onclick=async()=>{
-  initAudio();
+  initAudio();chooseAct(selectedAct);
   if(!navigator.xr){msg.textContent='WebXR isn’t available here. Open this on a Quest browser.';return}
-  try{const sess=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
-    renderer.xr.setSession(sess);ui.style.display='none';if(!micOn)initMic();sess.addEventListener('end',()=>{ui.style.display='flex'})}
-  catch(e){msg.textContent='Could not start VR: '+e.message}};
-if(navigator.xr)navigator.xr.isSessionSupported('immersive-vr').then(ok=>{if(!ok)msg.textContent='Immersive VR isn’t supported on this device/browser.'});
+  try{
+    let sess=renderer.xr.getSession();
+    if(sess){
+      // The menu remains in the headset (DOM overlay where supported), so choose an act in VR.
+      gameStarted=true;cutsceneT=0;arrivalFade=0;introHome.visible=true;rig.position.set(0,0,40);camera.position.y=.62;fadeMat.opacity=1;
+      ui.style.display='none';if(!micOn)initMic();return;
+    }
+    try{sess=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor','dom-overlay'],domOverlay:{root:ui}})}
+    catch(e){sess=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']})}
+    await renderer.xr.setSession(sess);
+    // Keep the menu open in-headset first. Tap the button again to begin the selected act.
+    btn.textContent='BEGIN ACT '+selectedAct;
+    msg.textContent='Choose an act here in VR, then press BEGIN ACT.';
+    sess.addEventListener('end',()=>{ui.style.display='flex';gameStarted=false;cutsceneT=-1;arrivalFade=0;introHome.visible=false;camera.position.y=1.6;rig.position.set(0,0,26);fadeMat.opacity=0;btn.textContent='START ACT '+selectedAct+' IN VR'});
+  }catch(e){msg.textContent='Could not start VR: '+e.message}};if(navigator.xr)navigator.xr.isSessionSupported('immersive-vr').then(ok=>{if(!ok)msg.textContent='Immersive VR isn’t supported on this device/browser.'});
 renderer.setAnimationLoop(()=>{const dt=Math.min(clock.getDelta(),.05);update(dt,clock.elapsedTime);renderer.render(scene,camera)});
 </script></body></html>
