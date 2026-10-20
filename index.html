@@ -29,6 +29,8 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const T=THREE;
+// Define shared materials before building the intro room, which calls mat() immediately.
+const mat=(c,r=.9,map)=>new T.MeshStandardMaterial({color:c,roughness:r,map:map||null});
 const renderer=new T.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
 renderer.xr.enabled=true;renderer.xr.setReferenceSpaceType('local-floor');
@@ -72,7 +74,6 @@ plight(-12,1.6,-6,0xffaa66,.5,16);plight(12,1.6,6,0xffaa66,.5,16);plight(16,-2,-
 
 // ---------- helpers ----------
 const Y=[-3.2,0,3.2],WH=3;let curY=0;
-const mat=(c,r=.9,map)=>new T.MeshStandardMaterial({color:c,roughness:r,map:map||null});
 const lvlOf=y=>Math.max(0,Math.min(2,Math.round(y/3.2)+1));
 const walls=[];
 function box(cx,cz,w,d,h,y,color,o={}){
